@@ -9,14 +9,16 @@ Run:
 
 import time
 from datetime import datetime
-import streamlit as st
-from dotenv import load_dotenv
+
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
-load_dotenv()
+import os
+import streamlit as st
+
+os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
 
 
 @st.cache_resource
@@ -217,6 +219,9 @@ section[data-testid="stSidebar"] *{color:var(--text) !important;}
 )
 
 db = load_vectorstore()
+st.sidebar.success(
+    f"Knowledge Base Loaded: {len(db.index_to_docstore_id)} docs"
+)
 llm = get_llm()
 
 if "messages" not in st.session_state:
@@ -300,9 +305,18 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.markdown('<div class="new-chat">', unsafe_allow_html=True)
-    if st.button("✨  New Chat", use_container_width=True, key="new_chat"):
-        st.session_state.messages = []
+    if st.button("✨ New Chat"):
+
+        st.session_state.messages = [
+            {
+                "role": "assistant",
+                "content":
+                "👋 Hey! I'm InterviewAI. Ask me anything about Resume, DSA, DBMS, OOP, HR Interviews and Placements."
+            }
+        ]
+
         st.rerun()
+        
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="sb-label">Categories</div>', unsafe_allow_html=True)
@@ -388,14 +402,19 @@ with main:
 
         with st.spinner("Searching knowledge base..."):
 
-          docs = db.similarity_search(
-              prompt,
-              k=5
-          )
-
-        context = "\n\n".join(
-            [doc.page_content for doc in docs]
+            retriever = db.as_retriever(
+                search_type="similarity",
+                search_kwargs={"k": 3}
         )
+
+            docs = retriever.invoke(prompt)
+
+        if docs:
+            context = "\n\n".join(
+                [doc.page_content for doc in docs]
+    )
+        else:
+            context = ""
 
         rag_prompt = f"""
       You are InterviewAI.
@@ -425,7 +444,25 @@ with main:
 
         start = time.time()
 
-        response = llm.invoke(rag_prompt)
+        if context:
+
+            response = llm.invoke(rag_prompt)
+
+            answer = response.content
+
+        else:
+
+            answer = """
+        I could not find this information in the knowledge base.
+
+        Try asking:
+
+        • Resume questions
+        • DSA questions
+        • DBMS questions
+        • OOP concepts
+        • HR interview questions
+        """
 
         elapsed = round(time.time() - start, 2)
 
@@ -447,54 +484,88 @@ with main:
 
         st.session_state.messages.append({
             "role": "assistant",
-            "content": f"{response.content}\n\n⏱ Response Time: {elapsed}s",
+            "content": f"{answer}\n\n⏱ Response Time: {elapsed}s",
             "sources": sources
-        })
+})
         st.rerun()
 
-with side: 
-    st.markdown("### 📚 Practice Questions")
-    selected_category = st.selectbox(
-    "Choose Category",
-    ["DSA", "DBMS", "OOP", "HR", "Resume"]
-)
+with side:
 
-for q in CATEGORY_QUESTIONS[selected_category]:
-    if st.button(q, use_container_width=True):
-        st.session_state.selected_question = q
-    st.markdown('<div class="panel"><h5>Session Stats</h5>', unsafe_allow_html=True)
+    st.markdown("### 📚 Practice Questions")
+
+    selected_category = st.selectbox(
+        "Choose Category",
+        ["DSA", "DBMS", "OOP", "HR", "Resume"]
+    )
+
+    for q in CATEGORY_QUESTIONS[selected_category]:
+
+        if st.button(
+            q,
+            key=f"{selected_category}_{q}",
+            use_container_width=True
+        ):
+            st.session_state.selected_question = q
+            st.rerun()
+
+    st.markdown(
+        '<div class="panel"><h5>Session Stats</h5>',
+        unsafe_allow_html=True
+    )
+
+    doc_count = len(db.index_to_docstore_id)
+
     st.markdown(
         f"""
-        <div class="stat"><span class="l">Questions Asked</span><span class="v">{st.session_state.asked}</span></div>
-        <div class="stat"><span class="l">Documents Indexed</span><span class="v">len(db.index_to_docstore_id)</span></div>
-        <div class="stat"><span class="l">Avg. Response Time</span><span class="v">1.2s</span></div>
-        <div class="stat"><span class="l">Accuracy</span><span class="v">96%</span></div>
+        <div class="stat">
+            <span class="l">Questions Asked</span>
+            <span class="v">{st.session_state.asked}</span>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        """
-        <div class="panel"><h5>Focus Areas</h5>
-          <span class="tag">DSA</span><span class="tag">System Design</span>
-          <span class="tag">DBMS</span><span class="tag">OOP</span>
-          <span class="tag">HR</span><span class="tag">Aptitude</span>
+
+        <div class="stat">
+            <span class="l">Documents Indexed</span>
+            <span class="v">{doc_count}</span>
         </div>
-        <div class="panel"><h5>Tip of the Day</h5>
-          <p style="margin:0;color:var(--muted);font-size:.88rem;line-height:1.55;">
-          Quantify every resume bullet. "Improved API latency by <b style="color:#fff">38%</b>"
-          beats "Improved API performance" every single time.</p>
+
+        <div class="stat">
+            <span class="l">Model</span>
+            <span class="v">Gemini</span>
+        </div>
+
+        <div class="stat">
+            <span class="l">Vector DB</span>
+            <span class="v">FAISS</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-st.markdown(
-    f"""
-    <div class="footer">
-      <div><span class="dot"></span>Powered by <b>Gemini</b> · RAG + FAISS + LangChain</div>
-      <div>© {datetime.now().year} InterviewAI — Built for ambitious engineers.</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div class="panel">
+            <h5>Focus Areas</h5>
+
+            <span class="tag">DSA</span>
+            <span class="tag">DBMS</span>
+            <span class="tag">OOP</span>
+            <span class="tag">HR</span>
+            <span class="tag">Resume</span>
+            <span class="tag">Placement</span>
+        </div>
+
+        <div class="panel">
+            <h5>Tip of the Day</h5>
+
+            <p style="margin:0;color:var(--muted);font-size:.88rem;line-height:1.55;">
+                Quantify every resume bullet.
+                Example:
+                "Improved API latency by 38%"
+                instead of
+                "Improved API performance".
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )

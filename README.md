@@ -96,7 +96,7 @@ InterviewAI/
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/InterviewAI.git
+git clone https://github.com/subhasw123/InterviewAI.git
 
 cd InterviewAI
 ```

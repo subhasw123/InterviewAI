@@ -9,7 +9,7 @@ Run:
 
 import time
 from datetime import datetime
-
+from pypdf import PdfReader
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -223,6 +223,21 @@ st.sidebar.success(
     f"Knowledge Base Loaded: {len(db.index_to_docstore_id)} docs"
 )
 llm = get_llm()
+
+def extract_resume_text(uploaded_file):
+
+    pdf_reader = PdfReader(uploaded_file)
+
+    text = ""
+
+    for page in pdf_reader.pages:
+
+        page_text = page.extract_text()
+
+        if page_text:
+            text += page_text + "\n"
+
+    return text
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
@@ -490,6 +505,47 @@ with main:
         st.rerun()
 
 with side:
+
+    st.markdown("### 📄 Resume ATS Analyzer")
+
+    uploaded_resume = st.file_uploader(
+        "Upload Resume (PDF)",
+        type=["pdf"]
+    )
+
+    if uploaded_resume:
+
+        if st.button("🚀 Analyze Resume"):
+
+            with st.spinner("Analyzing Resume..."):
+
+                resume_text = extract_resume_text(
+                    uploaded_resume
+                )
+
+                ats_prompt = f"""
+    You are an expert ATS Resume Analyzer.
+
+    Analyze this resume and provide:
+
+    1. ATS Score out of 100
+    2. Resume Summary
+    3. Strengths
+    4. Weaknesses
+    5. Missing Skills
+    6. Suggestions for Improvement
+
+    Resume:
+
+    {resume_text}
+
+    Format your response clearly using headings.
+    """
+
+                ats_response = llm.invoke(ats_prompt)
+
+            st.markdown("## 📊 ATS Analysis Report")
+            st.markdown(ats_response.content)
 
     st.markdown("### 📚 Practice Questions")
 

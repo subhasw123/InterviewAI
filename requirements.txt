@@ -7,3 +7,5 @@ faiss-cpu
 python-dotenv
 pypdf
 unstructured
+mysql-connector-python
+bcrypt

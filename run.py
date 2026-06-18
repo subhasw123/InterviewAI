@@ -11,12 +11,17 @@ import time
 from datetime import datetime
 from pypdf import PdfReader
 
+import bcrypt
+
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 import os
 import streamlit as st
+
+
 
 os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
 
@@ -75,7 +80,27 @@ html, body, [class*="css"], .stApp, .main, section.main{
     radial-gradient(800px 600px at 50% 100%, rgba(6,182,212,.12), transparent 60%),
     linear-gradient(180deg,#07081A 0%, #0A0B1E 60%, #07081A 100%) !important;
 }
-#MainMenu, footer, header [data-testid="stToolbar"]{visibility:hidden;}
+#MainMenu, footer{visibility:hidden;}
+[data-testid="stToolbar"]{display:none !important;}
+[data-testid="stDecoration"]{display:none !important;}
+[data-testid="stHeader"]{
+  background:rgba(7,8,26,0.95) !important;
+  border-bottom:1px solid var(--border) !important;
+}
+/* Force sidebar always open and visible */
+section[data-testid="stSidebar"]{
+  display:flex !important;
+  visibility:visible !important;
+  opacity:1 !important;
+  min-width:244px !important;
+  max-width:320px !important;
+  transform:translateX(0) !important;
+}
+[data-testid="stSidebarContent"]{
+  display:flex !important;
+  flex-direction:column !important;
+  visibility:visible !important;
+}
 .block-container{padding-top:1.2rem; padding-bottom:6rem; max-width:1400px;}
 
 /* ───── Sidebar ───── */
@@ -99,13 +124,45 @@ section[data-testid="stSidebar"] *{color:var(--text) !important;}
 }
 .new-chat .stButton>button:hover{transform:translateY(-1px); filter:brightness(1.08);}
 .sb-label{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:1rem .25rem .4rem;}
-.sb-item{
-  display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;border-radius:10px;
-  color:var(--text);font-size:.9rem;border:1px solid transparent;cursor:pointer;
-  transition:background .2s ease,border-color .2s ease, transform .2s ease;
+
+/* ── Category nav buttons — look like sidebar nav items ── */
+section[data-testid="stSidebar"] .element-container .stButton>button{
+  background:transparent !important;
+  border:1px solid transparent !important;
+  border-radius:10px !important;
+  color:var(--text) !important;
+  font-size:.9rem !important;
+  font-weight:400 !important;
+  text-align:left !important;
+  justify-content:flex-start !important;
+  padding:.5rem .75rem !important;
+  width:100% !important;
+  transition:background .2s, border-color .2s, transform .2s !important;
+  box-shadow:none !important;
+  letter-spacing:.01em !important;
 }
-.sb-item:hover{background:rgba(255,255,255,.04); border-color:var(--border); transform:translateX(2px);}
-.sb-item .ico{width:22px;text-align:center;}
+section[data-testid="stSidebar"] .element-container .stButton>button:hover{
+  background:rgba(255,255,255,.06) !important;
+  border-color:rgba(255,255,255,.1) !important;
+  transform:translateX(4px) !important;
+}
+/* New Chat overrides – must be more specific */
+section[data-testid="stSidebar"] .new-chat .element-container .stButton>button,
+section[data-testid="stSidebar"] .new-chat .stButton>button{
+  background:var(--grad) !important;
+  border:1px solid transparent !important;
+  color:#fff !important;
+  font-weight:600 !important;
+  text-align:center !important;
+  justify-content:center !important;
+  box-shadow:0 10px 30px rgba(59,130,246,.35) !important;
+  transform:none !important;
+}
+section[data-testid="stSidebar"] .new-chat .stButton>button:hover{
+  filter:brightness(1.1) !important;
+  transform:translateY(-1px) !important;
+  border-color:transparent !important;
+}
 .sb-history{font-size:.85rem;color:var(--muted);padding:.45rem .7rem;border-radius:8px;}
 .sb-history:hover{background:rgba(255,255,255,.04); color:var(--text);}
 
@@ -239,6 +296,76 @@ def extract_resume_text(uploaded_file):
 
     return text
 
+def register_user(
+    name,
+    email,
+    password,
+    desired_role,
+    skills
+):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    hashed_password = bcrypt.hashpw(
+        password.encode(),
+        bcrypt.gensalt()
+    )
+
+    query = """
+    INSERT INTO users
+    (
+        name,
+        email,
+        password,
+        desired_role,
+        skills
+    )
+    VALUES (%s,%s,%s,%s,%s)
+    """
+
+    cursor.execute(
+        query,
+        (
+            name,
+            email,
+            hashed_password.decode(),
+            desired_role,
+            skills
+        )
+    )
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+
+def login_user(email, password):
+
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute(
+        "SELECT * FROM users WHERE email=%s",
+        (email,)
+    )
+
+    user = cursor.fetchone()
+
+    cursor.close()
+    conn.close()
+
+    if user:
+
+        if bcrypt.checkpw(
+            password.encode(),
+            user["password"].encode()
+        ):
+
+            return user
+
+    return None
+
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant",
@@ -253,10 +380,30 @@ if "asked" not in st.session_state:
 if "selected_question" not in st.session_state:
     st.session_state.selected_question = None
 
+if "page" not in st.session_state:
+    st.session_state.page = "home"
+
+
+
+
 CATEGORIES = [
-    ("📄", "Resume Review"), ("💼", "HR Interview"), ("🧠", "Technical Interview"),
-    ("🧮", "DSA"), ("🗄️", "DBMS"), ("🧩", "OOP"), ("📊", "Aptitude"),
+    ("📄", "Resume Review", "resume_analyzer"),
+    ("💼", "HR Interview",  "chat_hr"),
+    ("🧠", "Technical Interview", "chat_technical"),
+    ("🧮", "DSA",  "chat_dsa"),
+    ("🗄️", "DBMS", "chat_dbms"),
+    ("🧩", "OOP",  "chat_oop"),
+    ("📊", "Aptitude", "chat_aptitude"),
 ]
+
+CATEGORY_STARTERS = {
+    "chat_hr":        "Give me a common HR interview question and a sample answer.",
+    "chat_technical": "Give me a common technical interview question for software engineers.",
+    "chat_dsa":       "Explain the Two Sum problem and its optimal solution.",
+    "chat_dbms":      "Explain ACID properties in DBMS.",
+    "chat_oop":       "Explain the four pillars of Object-Oriented Programming.",
+    "chat_aptitude":  "Give me a common aptitude question asked in placement exams with solution.",
+}
 HISTORY = [
     "Two Sum — optimal approach", "SQL joins explained",
     "Tell me about yourself", "Resume bullet rewrite",
@@ -320,7 +467,9 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.markdown('<div class="new-chat">', unsafe_allow_html=True)
+    
     if st.button("✨ New Chat"):
+
 
         st.session_state.messages = [
             {
@@ -335,11 +484,15 @@ with st.sidebar:
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="sb-label">Categories</div>', unsafe_allow_html=True)
-    st.markdown(
-        "".join(f'<div class="sb-item"><span class="ico">{i}</span>{n}</div>'
-                for i, n in CATEGORIES),
-        unsafe_allow_html=True,
-    )
+    for ico, name, page_key in CATEGORIES:
+        if st.button(f"{ico}  {name}", key=f"cat_{page_key}", use_container_width=True):
+            if page_key == "resume_analyzer":
+                st.session_state.page = "resume_analyzer"
+            else:
+                # Pre-load a starter question and go to home/chat
+                st.session_state.page = "home"
+                st.session_state.selected_question = CATEGORY_STARTERS[page_key]
+            st.rerun()
     st.markdown('<div class="sb-label">Chat History</div>', unsafe_allow_html=True)
     st.markdown(
         "".join(f'<div class="sb-history">💭 {h}</div>' for h in HISTORY),
@@ -349,93 +502,86 @@ with st.sidebar:
 # ──────────────────────────────  LAYOUT  ───────────────────────────────────
 main, side = st.columns([2.4, 1], gap="large")
 
-with main:
-    st.markdown(
-        """
-        <div class="hero">
-          <div class="badge">✦ Powered by Gemini · RAG + FAISS + LangChain</div>
-          <h1>AI Resume &amp; Interview Assistant</h1>
-          <p>Your personal AI mentor for interviews, placements and career growth —
-          built for students, freshers and software engineering candidates.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    cards = "".join(
-        f"""<div class="qa-card"><div class="ico">{i}</div>
-        <h4>{t}</h4><p>{d}</p></div>""" for i, t, d in QUICK
-    )
-    st.markdown(f'<div class="qa-grid">{cards}</div>', unsafe_allow_html=True)
-
-    # Chat transcript
-    st.markdown('<div class="chat-wrap">', unsafe_allow_html=True)
-    for m in st.session_state.messages:
-        if m["role"] == "user":
-            st.markdown(
-                f"""<div class="msg-row user">
-                  <div class="bubble user">{m["content"]}</div>
-                  <div class="avatar user">U</div></div>""",
-                unsafe_allow_html=True,
-            )
-        else:
-            srcs = ""
-            if m.get("sources"):
-                chips = "".join(
-                    f'<div class="src"><b>{s["title"]}</b> · {s["kind"]}</div>'
-                    for s in m["sources"]
-                )
-                srcs = f'<div class="sources">{chips}</div>'
-            st.markdown(
-                f"""<div class="msg-row">
-                  <div class="avatar ai">ai</div>
-                  <div class="bubble ai">{m["content"]}{srcs}</div></div>""",
-                unsafe_allow_html=True,
-            )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    chat_input = st.chat_input(
-    "Ask InterviewAI anything — DSA, HR, resume, OOP…"
-)
-
-    prompt = chat_input
-
-    if st.session_state.selected_question:
-        prompt = st.session_state.selected_question
-        st.session_state.selected_question = None
-    if prompt:
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        st.session_state.asked += 1
-        placeholder = st.empty()
-        placeholder.markdown(
-            """<div class="msg-row"><div class="avatar ai">ai</div>
-            <div class="bubble ai"><span class="typing">
-            <span></span><span></span><span></span></span></div></div>""",
+if st.session_state.page == "home":
+    with main:
+        st.markdown(
+            """
+            <div class="hero">
+            <div class="badge">✦ Powered by Gemini · RAG + FAISS + LangChain</div>
+            <h1>AI Resume &amp; Interview Assistant</h1>
+            <p>Your personal AI mentor for interviews, placements and career growth —
+            built for students, freshers and software engineering candidates.</p>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
-        time.sleep(1.0)
 
-        with st.spinner("Searching knowledge base..."):
-
-            retriever = db.as_retriever(
-                search_type="similarity",
-                search_kwargs={"k": 3}
+        cards = "".join(
+            f"""<div class="qa-card"><div class="ico">{i}</div>
+            <h4>{t}</h4><p>{d}</p></div>""" for i, t, d in QUICK
         )
+        st.markdown(f'<div class="qa-grid">{cards}</div>', unsafe_allow_html=True)
 
-            docs = retriever.invoke(prompt)
+        # Chat transcript
+        st.markdown('<div class="chat-wrap">', unsafe_allow_html=True)
+        for m in st.session_state.messages:
+            if m["role"] == "user":
+                st.markdown(
+                    f"""<div class="msg-row user">
+                      <div class="bubble user">{m["content"]}</div>
+                      <div class="avatar user">U</div></div>""",
+                    unsafe_allow_html=True,
+                )
+            else:
+                srcs = ""
+                if m.get("sources"):
+                    chips = "".join(
+                        f'<div class="src"><b>{s["title"]}</b> · {s["kind"]}</div>'
+                        for s in m["sources"]
+                    )
+                    srcs = f'<div class="sources">{chips}</div>'
+                st.markdown(
+                    f"""<div class="msg-row">
+                      <div class="avatar ai">ai</div>
+                      <div class="bubble ai">{m["content"]}{srcs}</div></div>""",
+                    unsafe_allow_html=True,
+                )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        if docs:
-            context = "\n\n".join(
-                [doc.page_content for doc in docs]
-    )
-        else:
-            context = ""
+        chat_input = st.chat_input("Ask InterviewAI anything — DSA, HR, resume, OOP…")
+        prompt = chat_input
 
-        rag_prompt = f"""
+        if st.session_state.selected_question:
+            prompt = st.session_state.selected_question
+            st.session_state.selected_question = None
+        if prompt:
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.asked += 1
+            placeholder = st.empty()
+            placeholder.markdown(
+                """<div class="msg-row"><div class="avatar ai">ai</div>
+                <div class="bubble ai"><span class="typing">
+                <span></span><span></span><span></span></span></div></div>""",
+                unsafe_allow_html=True,
+            )
+            time.sleep(1.0)
+
+            with st.spinner("Searching knowledge base..."):
+                retriever = db.as_retriever(
+                    search_type="similarity",
+                    search_kwargs={"k": 3}
+                )
+                docs = retriever.invoke(prompt)
+
+            if docs:
+                context = "\n\n".join([doc.page_content for doc in docs])
+            else:
+                context = ""
+
+            rag_prompt = f"""
       You are InterviewAI.
 
       You help users with:
-
       - Resume Building
       - DSA
       - DBMS
@@ -445,9 +591,7 @@ with main:
       - Placement Preparation
 
       Use ONLY the information provided below.
-
       If the answer is unavailable, say:
-
       'I could not find this information in the knowledge base.'
 
       Context:
@@ -457,21 +601,16 @@ with main:
       {prompt}
       """
 
-        start = time.time()
+            start = time.time()
 
-        if context:
-
-            response = llm.invoke(rag_prompt)
-
-            answer = response.content
-
-        else:
-
-            answer = """
+            if context:
+                response = llm.invoke(rag_prompt)
+                answer = response.content
+            else:
+                answer = """
         I could not find this information in the knowledge base.
 
         Try asking:
-
         • Resume questions
         • DSA questions
         • DBMS questions
@@ -479,51 +618,41 @@ with main:
         • HR interview questions
         """
 
-        elapsed = round(time.time() - start, 2)
+            elapsed = round(time.time() - start, 2)
+            placeholder.empty()
 
-        placeholder.empty()
+            sources = []
+            for doc in docs:
+                source_name = doc.metadata.get("source", "Knowledge Base")
+                sources.append({"title": source_name.split("\\")[-1], "kind": "PDF"})
 
-        sources = []
-
-        for doc in docs:
-
-            source_name = doc.metadata.get(
-                "source",
-                "Knowledge Base"
-            )
-
-            sources.append({
-                "title": source_name.split("\\")[-1],
-                "kind": "PDF"
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": f"{answer}\n\n⏱ Response Time: {elapsed}s",
+                "sources": sources
             })
+            st.rerun()
 
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": f"{answer}\n\n⏱ Response Time: {elapsed}s",
-            "sources": sources
-})
-        st.rerun()
+elif st.session_state.page == "resume_analyzer":
+    with main:
+        if st.button("← Back to Home"):
+            st.session_state.page = "home"
+            st.rerun()
+            
+        st.markdown("## 📄 Resume ATS Analyzer")
+        st.write("Upload your resume to get an AI-powered ATS analysis, feedback, and improvement suggestions.")
 
-with side:
+        uploaded_resume = st.file_uploader(
+            "Upload Resume (PDF)",
+            type=["pdf"]
+        )
 
-    st.markdown("### 📄 Resume ATS Analyzer")
+        if uploaded_resume:
+            if st.button("🚀 Analyze Resume", type="primary", use_container_width=True):
+                with st.spinner("Analyzing Resume..."):
+                    resume_text = extract_resume_text(uploaded_resume)
 
-    uploaded_resume = st.file_uploader(
-        "Upload Resume (PDF)",
-        type=["pdf"]
-    )
-
-    if uploaded_resume:
-
-        if st.button("🚀 Analyze Resume"):
-
-            with st.spinner("Analyzing Resume..."):
-
-                resume_text = extract_resume_text(
-                    uploaded_resume
-                )
-
-                ats_prompt = f"""
+                    ats_prompt = f"""
     You are an expert ATS Resume Analyzer.
 
     Analyze this resume and provide:
@@ -541,28 +670,12 @@ with side:
 
     Format your response clearly using headings.
     """
+                    ats_response = llm.invoke(ats_prompt)
 
-                ats_response = llm.invoke(ats_prompt)
+                st.markdown("## 📊 ATS Analysis Report")
+                st.markdown(ats_response.content)
 
-            st.markdown("## 📊 ATS Analysis Report")
-            st.markdown(ats_response.content)
-
-    st.markdown("### 📚 Practice Questions")
-
-    selected_category = st.selectbox(
-        "Choose Category",
-        ["DSA", "DBMS", "OOP", "HR", "Resume"]
-    )
-
-    for q in CATEGORY_QUESTIONS[selected_category]:
-
-        if st.button(
-            q,
-            key=f"{selected_category}_{q}",
-            use_container_width=True
-        ):
-            st.session_state.selected_question = q
-            st.rerun()
+with side:
 
     st.markdown(
         '<div class="panel"><h5>Session Stats</h5>',
@@ -598,30 +711,22 @@ with side:
 
     st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown('<div class="panel"><h5>Focus Areas</h5>', unsafe_allow_html=True)
     st.markdown(
-        """
-        <div class="panel">
-            <h5>Focus Areas</h5>
-
-            <span class="tag">DSA</span>
-            <span class="tag">DBMS</span>
-            <span class="tag">OOP</span>
-            <span class="tag">HR</span>
-            <span class="tag">Resume</span>
-            <span class="tag">Placement</span>
-        </div>
-
-        <div class="panel">
-            <h5>Tip of the Day</h5>
-
-            <p style="margin:0;color:var(--muted);font-size:.88rem;line-height:1.55;">
-                Quantify every resume bullet.
-                Example:
-                "Improved API latency by 38%"
-                instead of
-                "Improved API performance".
-            </p>
-        </div>
-        """,
+        '<span class="tag">DSA</span> '
+        '<span class="tag">DBMS</span> '
+        '<span class="tag">OOP</span> '
+        '<span class="tag">HR</span> '
+        '<span class="tag">Resume</span> '
+        '<span class="tag">Placement</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="panel"><h5>Tip of the Day</h5>'
+        '<p style="margin:0;color:var(--muted);font-size:.88rem;line-height:1.55;">'
+        'Quantify every resume bullet. Example: '
+        '"Improved API latency by 38%" instead of "Improved API performance".'
+        '</p></div>',
         unsafe_allow_html=True,
     )

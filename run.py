@@ -87,20 +87,40 @@ html, body, [class*="css"], .stApp, .main, section.main{
   background:rgba(7,8,26,0.95) !important;
   border-bottom:1px solid var(--border) !important;
 }
-/* Force sidebar always open and visible */
-section[data-testid="stSidebar"]{
-  display:flex !important;
-  visibility:visible !important;
-  opacity:1 !important;
-  min-width:244px !important;
-  max-width:320px !important;
-  transform:translateX(0) !important;
+/* Force sidebar always open and visible on desktop only */
+@media (min-width: 768px) {
+  section[data-testid="stSidebar"]{
+    display:flex !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    min-width:244px !important;
+    max-width:320px !important;
+    transform:translateX(0) !important;
+  }
+  [data-testid="stSidebarContent"]{
+    display:flex !important;
+    flex-direction:column !important;
+    visibility:visible !important;
+  }
 }
-[data-testid="stSidebarContent"]{
-  display:flex !important;
-  flex-direction:column !important;
-  visibility:visible !important;
+
+/* Ensure mobile sidebar toggle hamburger icon is visible and styled for dark mode */
+[data-testid="stHeader"] button {
+  color: var(--text) !important;
+  fill: var(--text) !important;
 }
+[data-testid="stHeader"] button svg {
+  color: var(--text) !important;
+  fill: var(--text) !important;
+}
+
+/* Adjust bubble width on mobile for better readability */
+@media (max-width: 768px) {
+  .bubble {
+    max-width: 88% !important;
+  }
+}
+
 .block-container{padding-top:1.2rem; padding-bottom:6rem; max-width:1400px;}
 
 /* ───── Sidebar ───── */
@@ -296,75 +316,6 @@ def extract_resume_text(uploaded_file):
 
     return text
 
-def register_user(
-    name,
-    email,
-    password,
-    desired_role,
-    skills
-):
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    hashed_password = bcrypt.hashpw(
-        password.encode(),
-        bcrypt.gensalt()
-    )
-
-    query = """
-    INSERT INTO users
-    (
-        name,
-        email,
-        password,
-        desired_role,
-        skills
-    )
-    VALUES (%s,%s,%s,%s,%s)
-    """
-
-    cursor.execute(
-        query,
-        (
-            name,
-            email,
-            hashed_password.decode(),
-            desired_role,
-            skills
-        )
-    )
-
-    conn.commit()
-
-    cursor.close()
-    conn.close()
-
-
-def login_user(email, password):
-
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    cursor.execute(
-        "SELECT * FROM users WHERE email=%s",
-        (email,)
-    )
-
-    user = cursor.fetchone()
-
-    cursor.close()
-    conn.close()
-
-    if user:
-
-        if bcrypt.checkpw(
-            password.encode(),
-            user["password"].encode()
-        ):
-
-            return user
-
-    return None
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
@@ -569,12 +520,12 @@ if st.session_state.page == "home":
             with st.spinner("Searching knowledge base..."):
                 retriever = db.as_retriever(
                     search_type="similarity",
-                    search_kwargs={"k": 3}
+                    search_kwargs={"k": 2}
                 )
-                docs = retriever.invoke(prompt)
+                docs = retriever.invoke(prompt)[:2]
 
             if docs:
-                context = "\n\n".join([doc.page_content for doc in docs])
+                context = "\n\n".join([doc.page_content[:800] for doc in docs])
             else:
                 context = ""
 
